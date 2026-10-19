@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tragedy of the Commons — Grazing Simulator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+
+<div class="max-w-5xl mx-auto p-4">
+  <h1 class="text-3xl font-bold text-center text-green-400 mb-1">Tragedy of the Commons</h1>
+  <p class="text-center text-gray-400 mb-5 text-sm">Shared pasture simulation — will cooperation save the commons?</p>
+
+  <!-- Setup & Controls -->
+  <div class="grid md:grid-cols-3 gap-4 mb-5">
+    <div class="bg-gray-800 rounded-xl p-4">
+      <h2 class="font-semibold text-green-300 mb-2">Setup</h2>
+      <label class="block text-sm text-gray-400 mb-1">Number of Players (you + AI)</label>
+      <select id="numPlayers" class="w-full bg-gray-700 rounded px-2 py-1 text-white mb-3" aria-label="Number of players">
+        <option value="4">4 players</option>
+        <option value="5" selected>5 players</option>
+        <option value="6">6 players</option>
+      </select>
+      <button onclick="initGame()"
+        class="w-full bg-green-700 hover:bg-green-600 rounded py-2 font-semibold"
+        aria-label="Start new game">New Game</button>
+    </div>
+
+    <div class="bg-gray-800 rounded-xl p-4">
+      <h2 class="font-semibold text-green-300 mb-2">Pasture</h2>
+      <div class="mb-1 text-sm text-gray-400">Grass: <span id="grassVal" class="text-green-300 font-bold">100</span>/100 units</div>
+      <div class="w-full bg-gray-700 rounded-full h-5 overflow-hidden mb-2">
+        <div id="grassBar" class="h-5 rounded-full bg-green-500 transition-all duration-500" style="width:100%" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" aria-label="Pasture grass level"></div>
+      </div>
+      <div class="text-xs text-gray-400">Regrowth: +10% per round &nbsp;|&nbsp; Each cow eats 3 grass</div>
+      <div class="mt-2 text-sm">Round: <span id="roundDisp" class="text-yellow-300 font-bold">0</span>/20</div>
+    </div>
+
+    <div class="bg-gray-800 rounded-xl p-4">
+      <h2 class="font-semibold text-green-300 mb-2">Your Move (Round <span id="yourRound">1</span>)</h2>
+      <label class="block text-sm text-gray-400 mb-1">Add cattle this round: <span id="addCowsVal" class="text-white font-bold">2</span></label>
+      <input type="range" id="addCows" min="0" max="5" value="2"
+        class="w-full" aria-label="Number of cattle to add"
+        oninput="document.getElementById('addCowsVal').textContent=this.value">
+      <button id="playBtn" onclick="playRound()"
+        class="mt-3 w-full bg-yellow-600 hover:bg-yellow-500 rounded py-2 font-semibold"
+        aria-label="Submit your move for this round">Add Cattle &amp; Next Round</button>
+      <div id="actionMsg" class="mt-2 text-xs text-gray-300 min-h-[2rem]"></div>
+    </div>
+  </div>
+
+  <!-- Player Table -->
+  <div class="bg-gray-800 rounded-xl p-4 mb-5 overflow-x-auto">
+    <h2 class="font-semibold text-green-300 mb-3">Players</h2>
+    <table class="w-full text-sm" role="table" aria-label="Player cattle and score table">
+      <thead class="text-gray-400">
+        <tr>
+          <th class="text-left p-2">Player</th>
+          <th class="text-left p-2">Strategy</th>
+          <th class="text-center p-2">Cattle</th>
+          <th class="text-center p-2">Added This Round</th>
+          <th class="text-right p-2">Score</th>
+        </tr>
+      </thead>
+      <tbody id="playerTable"></tbody>
+    </table>
+  </div>
+
+  <!-- History Chart -->
+  <div class="bg-gray-800 rounded-xl p-4 mb-5">
+    <h2 class="font-semibold text-green-300 mb-2">History</h2>
+    <canvas id="histChart" width="800" height="150" aria-label="Grass and cattle history chart"></canvas>
+    <div class="flex flex-wrap gap-4 mt-2 text-xs justify-center">
+      <span class="flex items-center gap-1"><span class="w-3 h-3 bg-green-500 inline-block rounded"></span> Grass (÷10)</span>
+      <span class="flex items-center gap-1"><span class="w-3 h-3 bg-yellow-400 inline-block rounded"></span> You (cattle)</span>
+      <span id="aiLegend" class="flex gap-2"></span>
+    </div>
+  </div>
+
+  <!-- Educational -->
+  <div class="bg-gray-800 rounded-xl p-4">
+    <h2 class="font-semibold text-green-300 mb-2">About the Tragedy of the Commons</h2>
+    <div class="grid md:grid-cols-2 gap-4 text-sm text-gray-300">
+      <p>The <strong class="text-white">Tragedy of the Commons</strong>, described by Garrett Hardin (1968), occurs when individuals acting in self-interest deplete a shared resource. Each farmer benefits fully from adding a cow, but the cost (degraded pasture) is shared by all. Rational individual behavior leads to collective ruin.</p>
+      <p>Solutions include <strong class="text-white">regulation</strong> (enforced quotas), <strong class="text-white">privatization</strong> (divide the commons), or <strong class="text-white">community governance</strong> (Elinor Ostrom's Nobel Prize work — self-managed communal rules). Pure rational self-interest without communication tends to deplete shared resources.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+const AI_STRATEGIES = ['Greedy','Conservative','Adaptive','Random'];
+const AI_COLORS = ['#ef4444','#3b82f6','#a855f7','#f97316','#ec4899'];
+
+let game = null;
+
+function initGame() {
+  const n = +document.getElementById('numPlayers').value;
+  const aiCount = n - 1;
+  game = {
+    round: 0,
+    maxRounds: 20,
+    grass: 100,
+    maxGrass: 100,
+    over: false,
+    players: [],
+    history: [],  // {round, grass, cattle:[]}
+  };
+  // Player 0 = user
+  game.players.push({ name: 'You', isUser: true, cattle: 0, score: 0, strategy: 'Manual', lastAdded: 0 });
+  for (let i = 0; i < aiCount; i++) {
+    game.players.push({
+      name: `AI-${i+1}`,
+      isUser: false,
+      cattle: 0,
+      score: 0,
+      strategy: AI_STRATEGIES[i % AI_STRATEGIES.length],
+      lastAdded: 0,
+    });
+  }
+  document.getElementById('playBtn').disabled = false;
+  document.getElementById('playBtn').classList.remove('opacity-50','cursor-not-allowed');
+  renderAll();
+}
+
+function getAIMove(player, round) {
+  const avg = game.players.reduce((s,p)=>s+p.lastAdded,0) / game.players.length;
+  switch(player.strategy) {
+    case 'Greedy': return 5;
+    case 'Conservative': return 1;
+    case 'Adaptive': return Math.round(Math.max(0, Math.min(5, avg)));
+    default: return Math.floor(Math.random() * 6);
+  }
+}
+
+function playRound() {
+  if (!game || game.over) return;
+  game.round++;
+  const userAdd = +document.getElementById('addCows').value;
+  game.players[0].lastAdded = userAdd;
+  // AI moves
+  for (let i = 1; i < game.players.length; i++) {
+    game.players[i].lastAdded = getAIMove(game.players[i], game.round);
+  }
+
+  // Add cattle
+  game.players.forEach(p => { p.cattle += p.lastAdded; });
+
+  // Total consumption
+  const totalCows = game.players.reduce((s,p)=>s+p.cattle,0);
+  const consumed = totalCows * 3;
+  game.grass -= consumed;
+
+  // Overshoot: collapse proportionally
+  let msg = '';
+  if (game.grass < 0) {
+    const survive = Math.max(0, (game.grass + consumed) / 3); // how many cows can be supported
+    const ratio = totalCows > 0 ? survive / totalCows : 0;
+    game.players.forEach(p => {
+      const lost = p.cattle - Math.floor(p.cattle * ratio);
+      p.cattle = Math.max(0, Math.floor(p.cattle * ratio));
+      if (lost > 0 && p.isUser) msg = `Pasture collapsed! You lost ${lost} cattle.`;
+    });
+    game.grass = 0;
+    msg = msg || 'Pasture collapsed! All players lost cattle above carrying capacity.';
+  }
+
+  // Regrow
+  game.grass = Math.min(game.maxGrass, game.grass + game.grass * 0.10);
+  game.grass = Math.max(0, game.grass);
+
+  // Score
+  game.players.forEach(p => { p.score += p.cattle; });
+
+  // History
+  game.history.push({
+    round: game.round,
+    grass: game.grass,
+    cattle: game.players.map(p=>p.cattle)
+  });
+
+  const infoLines = game.players.map(p =>
+    `${escapeHtml(p.name)} added ${p.lastAdded}`
+  ).join(' | ');
+  document.getElementById('actionMsg').textContent =
+    msg || `Round ${game.round} done. ${infoLines.substring(0,80)}`;
+
+  if (game.round >= game.maxRounds) {
+    game.over = true;
+    document.getElementById('playBtn').disabled = true;
+    document.getElementById('playBtn').classList.add('opacity-50','cursor-not-allowed');
+    const winner = game.players.reduce((a,b)=>a.score>b.score?a:b);
+    document.getElementById('actionMsg').textContent =
+      `Game Over! Winner: ${escapeHtml(winner.name)} with score ${winner.score}. ${msg}`;
+  }
+
+  renderAll();
+}
+
+function renderAll() {
+  if (!game) return;
+  // Pasture
+  const pct = Math.round((game.grass / game.maxGrass) * 100);
+  document.getElementById('grassVal').textContent = Math.round(game.grass);
+  const bar = document.getElementById('grassBar');
+  bar.style.width = pct + '%';
+  bar.setAttribute('aria-valuenow', pct);
+  bar.className = 'h-5 rounded-full transition-all duration-500 ' +
+    (pct > 60 ? 'bg-green-500' : pct > 30 ? 'bg-yellow-500' : 'bg-red-500');
+  document.getElementById('roundDisp').textContent = game.round;
+  document.getElementById('yourRound').textContent = game.over ? '—' : game.round + 1;
+
+  // Player table
+  const tbody = document.getElementById('playerTable');
+  tbody.innerHTML = game.players.map((p,i) => `
+    <tr class="${p.isUser ? 'bg-yellow-900/30' : ''}">
+      <td class="p-2 font-semibold ${p.isUser ? 'text-yellow-300' : 'text-gray-200'}">${escapeHtml(p.name)}</td>
+      <td class="p-2 text-gray-400 text-xs">${escapeHtml(p.strategy)}</td>
+      <td class="p-2 text-center">
+        <span class="text-2xl" aria-label="${p.cattle} cattle">
+          ${'🐄'.repeat(Math.min(p.cattle,10))}${p.cattle > 10 ? '+' + (p.cattle-10) : ''}
+        </span>
+        <span class="ml-2 text-gray-300">${p.cattle}</span>
+      </td>
+      <td class="p-2 text-center text-gray-300">${game.round > 0 ? '+' + p.lastAdded : '—'}</td>
+      <td class="p-2 text-right font-bold text-green-300">${p.score}</td>
+    </tr>
+  `).join('');
+
+  drawChart();
+}
+
+function drawChart() {
+  const canvas = document.getElementById('histChart');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  if (!game || !game.history.length) {
+    ctx.fillStyle = '#4b5563';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Play a round to see history', W/2, H/2);
+    return;
+  }
+
+  const hist = game.history;
+  const n = hist.length;
+  const pad = 30;
+  const chartW = W - pad*2;
+  const chartH = H - pad;
+  const maxVal = Math.max(10, game.maxGrass/10, ...hist.map(h=>Math.max(...h.cattle)));
+
+  // Grid
+  ctx.strokeStyle = '#374151';
+  ctx.lineWidth = 0.5;
+  for (let v = 0; v <= maxVal; v += Math.ceil(maxVal/5)) {
+    const y = chartH - (v/maxVal)*chartH;
+    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-5,y); ctx.stroke();
+    ctx.fillStyle = '#6b7280'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, pad-2, y+3);
+  }
+
+  function plotLine(data, color) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    data.forEach((v,i) => {
+      const x = pad + (i/(Math.max(n-1,1)))*chartW;
+      const y = chartH - (v/maxVal)*chartH;
+      i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  }
+
+  // Grass line (divide by 10 for scale)
+  plotLine(hist.map(h=>h.grass/10), '#22c55e');
+
+  // Each player's cattle
+  const playerColors = ['#facc15', ...AI_COLORS];
+  game.players.forEach((p,pi) => {
+    plotLine(hist.map(h=>h.cattle[pi]), playerColors[pi]);
+  });
+
+  // X labels
+  hist.forEach((h,i) => {
+    const x = pad + (i/(Math.max(n-1,1)))*chartW;
+    ctx.fillStyle = '#9ca3af'; ctx.font = '9px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(h.round, x, H-2);
+  });
+
+  // Legend
+  const legendEl = document.getElementById('aiLegend');
+  legendEl.innerHTML = game.players.slice(1).map((p,i) =>
+    `<span class="flex items-center gap-1">
+      <span class="w-3 h-3 inline-block rounded" style="background:${AI_COLORS[i]}"></span>
+      ${escapeHtml(p.name)} (${escapeHtml(p.strategy)})
+    </span>`
+  ).join('');
+}
+
+// Start
+initGame();
+</script>
+</body>
+</html>
